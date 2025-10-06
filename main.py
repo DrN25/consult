@@ -8,11 +8,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import json
 import os
-from typing import Optional
+import httpx
+import asyncio
+from datetime import datetime
+from typing import Optional, Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(
     title="PMC to DOI API",
-    description="Get DOI from PMC ID",
+    description="Get DOI from PMC ID and metadata from Semantic Scholar",
     version="1.0.0"
 )
 
@@ -25,6 +32,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Get Semantic Scholar API key from environment variable
+SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
+
+# Rate limiter: 1 request per second for Semantic Scholar API
+last_request_time = None
+rate_limit_lock = asyncio.Lock()
+
+async def rate_limit():
+    """Ensure we don't exceed 1 request per second to Semantic Scholar"""
+    global last_request_time
+    async with rate_limit_lock:
+        if last_request_time is not None:
+            elapsed = datetime.now().timestamp() - last_request_time
+            if elapsed < 1.0:
+                await asyncio.sleep(1.0 - elapsed)
+        last_request_time = datetime.now().timestamp()
+
 # Request/Response models
 class PMCRequest(BaseModel):
     pmc_id: str
@@ -34,6 +58,12 @@ class DOIResponse(BaseModel):
     doi: Optional[str] = None
     found: bool
     message: str
+
+class MetadataResponse(BaseModel):
+    doi: str
+    found: bool
+    message: str
+    data: Optional[Dict[str, Any]] = None
 
 def load_doi_mapping(pmc_id: str) -> Optional[dict]:
     """
@@ -77,11 +107,13 @@ async def root():
             "GET /": "API information",
             "GET /health": "Health check",
             "GET /doi/{pmc_id}": "Get DOI by PMC ID (path parameter)",
-            "POST /doi": "Get DOI by PMC ID (JSON body)"
+            "POST /doi": "Get DOI by PMC ID (JSON body)",
+            "GET /metadata/{doi}": "Get metadata from Semantic Scholar by DOI"
         },
         "example_usage": {
-            "GET": "/doi/PMC2910419 or /doi/2910419",
-            "POST": "/doi with body: {\"pmc_id\": \"PMC2910419\"}"
+            "GET /doi": "/doi/PMC2910419 or /doi/2910419",
+            "POST /doi": "/doi with body: {\"pmc_id\": \"PMC2910419\"}",
+            "GET /metadata": "/metadata/10.1016/j.heliyon.2023.e16103"
         }
     }
 
@@ -140,6 +172,73 @@ async def get_doi_by_body(request: PMCRequest):
         doi=doi_data.get("DOI"),
         found=True,
         message="DOI found successfully"
+    )
+
+async def get_semantic_scholar_metadata(doi: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch metadata from Semantic Scholar API
+    Rate limited to 1 request per second
+    
+    Args:
+        doi: DOI identifier (e.g., "10.1016/j.heliyon.2023.e16103")
+    
+    Returns:
+        Dict with metadata or None if error
+    """
+    # Apply rate limiting (1 request per second)
+    await rate_limit()
+    
+    # Semantic Scholar API endpoint and fields (as per official example)
+    fields = "citationCount,influentialCitationCount,url,openAccessPdf,fieldsOfStudy,journal"
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{doi}?fields={fields}"
+    
+    # Headers with API key
+    headers = {}
+    if SEMANTIC_SCHOLAR_API_KEY:
+        headers["x-api-key"] = SEMANTIC_SCHOLAR_API_KEY
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                return None
+            elif response.status_code == 429:
+                print(f"[ERROR] Rate limit exceeded for DOI {doi}")
+                return None
+            else:
+                print(f"[ERROR] Semantic Scholar API returned {response.status_code}: {response.text}")
+                return None
+                
+    except Exception as e:
+        print(f"[ERROR] Fetching metadata for DOI {doi}: {str(e)}")
+        return None
+
+@app.get("/metadata/{doi:path}")
+async def get_metadata_by_doi(doi: str):
+    """
+    Get metadata from Semantic Scholar for a given DOI
+    
+    Example: GET /metadata/10.1016/j.heliyon.2023.e16103
+    """
+    # Fetch metadata from Semantic Scholar
+    metadata = await get_semantic_scholar_metadata(doi)
+    
+    if metadata is None:
+        return MetadataResponse(
+            doi=doi,
+            found=False,
+            message=f"Metadata not found for DOI: {doi}",
+            data=None
+        )
+    
+    return MetadataResponse(
+        doi=doi,
+        found=True,
+        message="Metadata retrieved successfully",
+        data=metadata
     )
 
 # For local development
