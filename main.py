@@ -60,7 +60,8 @@ class DOIResponse(BaseModel):
     message: str
 
 class MetadataResponse(BaseModel):
-    doi: str
+    doi: Optional[str] = None
+    pmc_id: Optional[str] = None  # Include PMC if converted
     found: bool
     message: str
     data: Optional[Dict[str, Any]] = None
@@ -108,12 +109,12 @@ async def root():
             "GET /health": "Health check",
             "GET /doi/{pmc_id}": "Get DOI by PMC ID (path parameter)",
             "POST /doi": "Get DOI by PMC ID (JSON body)",
-            "GET /metadata/{doi}": "Get metadata from Semantic Scholar by DOI"
+            "GET /metadata/{doi_or_pmc}": "Get metadata from Semantic Scholar by DOI or PMC ID (auto-converts PMC to DOI)"
         },
         "example_usage": {
             "GET /doi": "/doi/PMC2910419 or /doi/2910419",
             "POST /doi": "/doi with body: {\"pmc_id\": \"PMC2910419\"}",
-            "GET /metadata": "/metadata/10.1016/j.heliyon.2023.e16103"
+            "GET /metadata": "/metadata/10.1016/j.heliyon.2023.e16103 or /metadata/PMC2897429"
         }
     }
 
@@ -216,28 +217,66 @@ async def get_semantic_scholar_metadata(doi: str) -> Optional[Dict[str, Any]]:
         print(f"[ERROR] Fetching metadata for DOI {doi}: {str(e)}")
         return None
 
-@app.get("/metadata/{doi:path}")
-async def get_metadata_by_doi(doi: str):
+@app.get("/metadata/{doi_or_pmc:path}")
+async def get_metadata_by_doi(doi_or_pmc: str):
     """
-    Get metadata from Semantic Scholar for a given DOI
+    Get metadata from Semantic Scholar for a given DOI or PMC ID
     
-    Example: GET /metadata/10.1016/j.heliyon.2023.e16103
+    If a PMC ID is provided, it will be automatically converted to DOI first.
+    
+    Examples: 
+    - GET /metadata/10.1016/j.heliyon.2023.e16103
+    - GET /metadata/PMC2897429
+    - GET /metadata/2897429
     """
+    doi = doi_or_pmc
+    original_input = doi_or_pmc
+    pmc_id = None
+    
+    # Check if input is a PMC ID (contains "PMC" or is just numbers)
+    is_pmc = doi_or_pmc.upper().startswith("PMC") or doi_or_pmc.isdigit()
+    
+    if is_pmc:
+        # Convert PMC to DOI first
+        doi_data = load_doi_mapping(doi_or_pmc)
+        
+        if doi_data is None:
+            return MetadataResponse(
+                doi=None,
+                pmc_id=doi_or_pmc,
+                found=False,
+                message=f"PMC {doi_or_pmc} not found in database. Cannot retrieve metadata.",
+                data=None
+            )
+        
+        pmc_id = doi_data.get("PMC", doi_or_pmc)
+        doi = doi_data.get("DOI")
+        if not doi:
+            return MetadataResponse(
+                doi=None,
+                pmc_id=pmc_id,
+                found=False,
+                message=f"DOI not available for PMC {doi_or_pmc}",
+                data=None
+            )
+    
     # Fetch metadata from Semantic Scholar
     metadata = await get_semantic_scholar_metadata(doi)
     
     if metadata is None:
         return MetadataResponse(
             doi=doi,
+            pmc_id=pmc_id,
             found=False,
-            message=f"Metadata not found for DOI: {doi}",
+            message=f"Metadata not found for DOI: {doi}" + (f" (converted from {original_input})" if is_pmc else ""),
             data=None
         )
     
     return MetadataResponse(
         doi=doi,
+        pmc_id=pmc_id,
         found=True,
-        message="Metadata retrieved successfully",
+        message="Metadata retrieved successfully" + (f" (converted from PMC {original_input})" if is_pmc else ""),
         data=metadata
     )
 

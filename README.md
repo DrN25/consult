@@ -60,35 +60,55 @@ curl -X POST http://localhost:8001/doi \
 ```
 
 ### GET /metadata/{doi}
-Get metadata from Semantic Scholar by DOI
+Get metadata from Semantic Scholar by DOI or PMC ID
 
-**Example:**
+**Auto-converts PMC to DOI:** If you provide a PMC ID (with or without prefix), it will automatically be converted to DOI before fetching metadata.
+
+**Examples:**
 ```bash
+# With DOI
 curl http://localhost:8001/metadata/10.1128/AEM.03065-09
+
+# With PMC (auto-converts to DOI)
+curl http://localhost:8001/metadata/PMC2897429
+curl http://localhost:8001/metadata/2897429
 ```
 
-**Response:**
+**Response (with DOI):**
 ```json
 {
   "doi": "10.1128/AEM.03065-09",
+  "pmc_id": null,
   "found": true,
   "message": "Metadata retrieved successfully",
   "data": {
-    "paperId": "e9e10a725bfe2329313d3254472ce65da5315ceb",
+    "paperId": "12cc490c4209a8895ea377e30542112324f4c835",
     "url": "https://www.semanticscholar.org/paper/...",
-    "citationCount": 13,
-    "influentialCitationCount": 0,
+    "citationCount": 171,
+    "influentialCitationCount": 8,
     "openAccessPdf": {
       "url": "https://...",
-      "status": "GOLD",
-      "license": "CCBYNCND"
+      "status": "GREEN",
+      "license": null
     },
-    "fieldsOfStudy": ["Medicine"],
+    "fieldsOfStudy": ["Biology", "Medicine"],
     "journal": {
-      "name": "Heliyon",
-      "volume": "9"
+      "name": "Applied and Environmental Microbiology",
+      "pages": "4136 - 4142",
+      "volume": "76"
     }
   }
+}
+```
+
+**Response (with PMC auto-conversion):**
+```json
+{
+  "doi": "10.1128/AEM.03065-09",
+  "pmc_id": "PMC2897429",
+  "found": true,
+  "message": "Metadata retrieved successfully (converted from PMC PMC2897429)",
+  "data": { ... }
 }
 ```
 
