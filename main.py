@@ -45,9 +45,12 @@ def load_doi_mapping(pmc_id: str) -> Optional[dict]:
     Returns:
         Dict with PMC and DOI or None if not found
     """
-    # Clean PMC ID (remove 'PMC' prefix if present and add it back)
-    clean_id = pmc_id.upper().replace("PMC", "")
-    pmc_with_prefix = f"PMC{clean_id}"
+    # Normalize PMC ID to ensure it has PMC prefix
+    pmc_upper = pmc_id.upper().strip()
+    if not pmc_upper.startswith("PMC"):
+        pmc_with_prefix = f"PMC{pmc_upper}"
+    else:
+        pmc_with_prefix = pmc_upper
     
     # Path to DOI JSON files
     # In Vercel, files are at the same level as main.py
