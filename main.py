@@ -49,16 +49,10 @@ def load_doi_mapping(pmc_id: str) -> Optional[dict]:
     clean_id = pmc_id.upper().replace("PMC", "")
     pmc_with_prefix = f"PMC{clean_id}"
     
-    # Path to DOI JSON files (adjust to your directory structure)
-    # In production, this will be relative to the API location
-    file_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "..",
-        "data",
-        "doi",
-        f"{pmc_with_prefix}.json"
-    )
+    # Path to DOI JSON files
+    # In Vercel, files are at the same level as main.py
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, "data", "doi", f"{pmc_with_prefix}.json")
     
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
